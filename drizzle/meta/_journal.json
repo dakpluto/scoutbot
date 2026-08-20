@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787143804682,
+      "tag": "0000_sturdy_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787191831176,
+      "tag": "0001_purple_fixer",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787198321712,
+      "tag": "0002_faithful_wendell_rand",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+ALTER TABLE `events` ADD `discord_event_id` text;
