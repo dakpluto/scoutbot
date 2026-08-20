@@ -10,7 +10,7 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db } from "../db/index.js";
-import { dens, eventDens, eventTemplates, events } from "../db/schema.js";
+import { attendance, dens, eventDens, eventTemplates, events, signups } from "../db/schema.js";
 import { type GuildConfig, requireGuildConfig } from "../lib/guild-config.js";
 import { toUtcDate } from "../lib/timezone.js";
 import { isValidDate, isValidTime } from "../lib/validation.js";
@@ -111,6 +111,18 @@ const data = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub
+      .setName("delete")
+      .setDescription("Permanently delete an event that has no signups or attendance")
+      .addIntegerOption((opt) =>
+        opt
+          .setName("event-id")
+          .setDescription("Event")
+          .setRequired(true)
+          .setAutocomplete(true),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
       .setName("list")
       .setDescription("List events")
       .addBooleanOption((opt) =>
@@ -191,6 +203,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   if (sub === "create") return handleCreate(interaction, config);
   if (sub === "add-den") return handleAddDen(interaction);
   if (sub === "cancel") return handleCancel(interaction);
+  if (sub === "delete") return handleDelete(interaction);
   if (sub === "list") return handleList(interaction);
 }
 
@@ -450,6 +463,51 @@ async function handleCancel(interaction: ChatInputCommandInteraction): Promise<v
 
   await interaction.reply({
     content: `Cancelled **${event.title}** (${event.date}). Existing signups are kept as a historical record.${discordEventNote}`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleDelete(interaction: ChatInputCommandInteraction): Promise<void> {
+  const eventId = interaction.options.getInteger("event-id", true);
+
+  const event = await db.query.events.findFirst({
+    where: and(eq(events.id, eventId), eq(events.guildId, interaction.guildId!)),
+  });
+  if (!event) {
+    await interaction.reply({ content: "Couldn't find that event.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const [existingSignup] = await db.query.signups.findMany({
+    where: eq(signups.eventId, eventId),
+    limit: 1,
+  });
+  const [existingAttendance] = await db.query.attendance.findMany({
+    where: eq(attendance.eventId, eventId),
+    limit: 1,
+  });
+  if (existingSignup || existingAttendance) {
+    await interaction.reply({
+      content: `**${event.title}** has signups or attendance recorded, so it can't be deleted — use \`/event cancel event-id:${eventId}\` instead to keep that history.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  if (event.discordEventId) {
+    try {
+      const guild = await resolveGuild(interaction);
+      await guild.scheduledEvents.delete(event.discordEventId);
+    } catch (error) {
+      console.error(`Failed to delete Discord scheduled event for event #${event.id}:`, error);
+    }
+  }
+
+  await db.delete(eventDens).where(eq(eventDens.eventId, eventId));
+  await db.delete(events).where(eq(events.id, eventId));
+
+  await interaction.reply({
+    content: `Deleted **${event.title}** (${event.date}).`,
     flags: MessageFlags.Ephemeral,
   });
 }
