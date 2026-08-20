@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
@@ -119,6 +119,36 @@ async function resolveGuild(interaction: ChatInputCommandInteraction) {
   return interaction.guild ?? interaction.client.guilds.fetch(interaction.guildId!);
 }
 
+/**
+ * Rebuilds the full Discord event description from scratch (base details +
+ * a den/uniform breakdown), so add-den stays correct even when it's
+ * updating a den already on the event rather than adding a new one.
+ */
+async function buildEventDescription(
+  eventId: number,
+  baseDetails: string | null,
+): Promise<string | undefined> {
+  const rows = await db.query.eventDens.findMany({ where: eq(eventDens.eventId, eventId) });
+  if (rows.length === 0) return baseDetails ?? undefined;
+
+  const denRows = await db.query.dens.findMany({
+    where: inArray(dens.id, rows.map((row) => row.denId)),
+  });
+  const denById = new Map(denRows.map((den) => [den.id, den.name]));
+
+  const uniformLines = rows.map((row) => {
+    const denName = denById.get(row.denId) ?? `Den #${row.denId}`;
+    const uniform =
+      row.uniformType === "other" ? `Other (${row.uniformOtherText})` : UNIFORM_LABELS[row.uniformType];
+    return `${denName}: ${uniform}`;
+  });
+
+  const parts = [baseDetails, `Uniforms by den:\n${uniformLines.join("\n")}`].filter(
+    (part): part is string => Boolean(part),
+  );
+  return parts.join("\n\n").slice(0, 1000);
+}
+
 async function handleCreate(
   interaction: ChatInputCommandInteraction,
   config: GuildConfig,
@@ -231,8 +261,21 @@ async function handleAddDen(interaction: ChatInputCommandInteraction): Promise<v
 
   const uniformLabel =
     uniformType === "other" ? `Other (${otherText})` : UNIFORM_LABELS[uniformType];
+
+  let discordEventNote = "";
+  if (event.discordEventId) {
+    try {
+      const guild = await resolveGuild(interaction);
+      const description = await buildEventDescription(eventId, event.details);
+      await guild.scheduledEvents.edit(event.discordEventId, { description });
+    } catch (error) {
+      console.error(`Failed to update Discord scheduled event for event #${eventId}:`, error);
+      discordEventNote = "\n(Couldn't update the linked Discord event's description.)";
+    }
+  }
+
   await interaction.reply({
-    content: `**${den.name}** is eligible for **${event.title}** — uniform: ${uniformLabel}.`,
+    content: `**${den.name}** is eligible for **${event.title}** — uniform: ${uniformLabel}.${discordEventNote}`,
     flags: MessageFlags.Ephemeral,
   });
 }
