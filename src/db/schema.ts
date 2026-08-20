@@ -69,6 +69,25 @@ export const events = sqliteTable("events", {
   ...timestamps,
 });
 
+/** Reusable event presets (e.g. "Pack Meeting") an admin defines per-guild via /event template. */
+export const eventTemplates = sqliteTable("event_templates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  guildId: text("guild_id")
+    .notNull()
+    .references(() => guilds.id),
+  name: text("name").notNull(),
+  startTime: text("start_time"),
+  endTime: text("end_time"),
+  location: text("location"),
+  details: text("details"),
+  /** When true, /event create with this template auto-adds every den currently configured for the guild. */
+  autoAddAllDens: integer("auto_add_all_dens", { mode: "boolean" }).notNull().default(false),
+  /** Uniform applied to auto-added dens; only meaningful when autoAddAllDens is true. */
+  uniformType: text("uniform_type", { enum: ["class_a", "pack_shirt", "other"] }),
+  uniformOtherText: text("uniform_other_text"),
+  ...timestamps,
+});
+
 /** Join table: which dens are eligible for an event, and each den's uniform for it. */
 export const eventDens = sqliteTable(
   "event_dens",

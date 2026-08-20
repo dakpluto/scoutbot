@@ -10,7 +10,7 @@ import {
   type ChatInputCommandInteraction,
 } from "discord.js";
 import { db } from "../db/index.js";
-import { dens, eventDens, events } from "../db/schema.js";
+import { dens, eventDens, eventTemplates, events } from "../db/schema.js";
 import { type GuildConfig, requireGuildConfig } from "../lib/guild-config.js";
 import { toUtcDate } from "../lib/timezone.js";
 import { isValidDate, isValidTime } from "../lib/validation.js";
@@ -21,6 +21,12 @@ const UNIFORM_LABELS: Record<string, string> = {
   pack_shirt: "Pack shirt",
   other: "Other",
 };
+
+const UNIFORM_CHOICES = [
+  { name: "Class A", value: "class_a" },
+  { name: "Pack shirt", value: "pack_shirt" },
+  { name: "Other", value: "other" },
+] as const;
 
 const data = new SlashCommandBuilder()
   .setName("event")
@@ -34,14 +40,30 @@ const data = new SlashCommandBuilder()
       .addStringOption((opt) =>
         opt.setName("date").setDescription("Date, YYYY-MM-DD").setRequired(true),
       )
-      .addStringOption((opt) =>
-        opt.setName("start-time").setDescription("Start time, 24h HH:MM").setRequired(true),
+      .addIntegerOption((opt) =>
+        opt
+          .setName("template")
+          .setDescription("Prefill from a saved template")
+          .setRequired(false)
+          .setAutocomplete(true),
       )
       .addStringOption((opt) =>
-        opt.setName("end-time").setDescription("End time, 24h HH:MM").setRequired(true),
+        opt
+          .setName("start-time")
+          .setDescription("Start time, 24h HH:MM (required unless the template sets one)")
+          .setRequired(false),
       )
       .addStringOption((opt) =>
-        opt.setName("location").setDescription("Location").setRequired(true),
+        opt
+          .setName("end-time")
+          .setDescription("End time, 24h HH:MM (required unless the template sets one)")
+          .setRequired(false),
+      )
+      .addStringOption((opt) =>
+        opt
+          .setName("location")
+          .setDescription("Location (required unless the template sets one)")
+          .setRequired(false),
       )
       .addStringOption((opt) =>
         opt.setName("details").setDescription("Additional details").setRequired(false),
@@ -66,11 +88,7 @@ const data = new SlashCommandBuilder()
           .setName("uniform")
           .setDescription("Uniform for this den at this event")
           .setRequired(true)
-          .addChoices(
-            { name: "Class A", value: "class_a" },
-            { name: "Pack shirt", value: "pack_shirt" },
-            { name: "Other", value: "other" },
-          ),
+          .addChoices(...UNIFORM_CHOICES),
       )
       .addStringOption((opt) =>
         opt
@@ -101,13 +119,75 @@ const data = new SlashCommandBuilder()
           .setDescription("Include past and cancelled events (default: upcoming only)")
           .setRequired(false),
       ),
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName("template")
+      .setDescription("Manage reusable event templates")
+      .addSubcommand((sub) =>
+        sub
+          .setName("add")
+          .setDescription("Save a new event template")
+          .addStringOption((opt) => opt.setName("name").setDescription("Template name").setRequired(true))
+          .addStringOption((opt) =>
+            opt.setName("start-time").setDescription("Start time, 24h HH:MM").setRequired(false),
+          )
+          .addStringOption((opt) =>
+            opt.setName("end-time").setDescription("End time, 24h HH:MM").setRequired(false),
+          )
+          .addStringOption((opt) => opt.setName("location").setDescription("Location").setRequired(false))
+          .addStringOption((opt) =>
+            opt.setName("details").setDescription("Default additional details").setRequired(false),
+          )
+          .addBooleanOption((opt) =>
+            opt
+              .setName("auto-add-all-dens")
+              .setDescription("Automatically add every current den, with the uniform below")
+              .setRequired(false),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName("uniform")
+              .setDescription("Uniform for auto-added dens (required if auto-add-all-dens is true)")
+              .setRequired(false)
+              .addChoices(...UNIFORM_CHOICES),
+          )
+          .addStringOption((opt) =>
+            opt
+              .setName("other-text")
+              .setDescription("Uniform details, required if uniform is Other")
+              .setRequired(false),
+          ),
+      )
+      .addSubcommand((sub) => sub.setName("list").setDescription("List saved event templates"))
+      .addSubcommand((sub) =>
+        sub
+          .setName("remove")
+          .setDescription("Delete a saved event template")
+          .addIntegerOption((opt) =>
+            opt
+              .setName("template")
+              .setDescription("Template")
+              .setRequired(true)
+              .setAutocomplete(true),
+          ),
+      ),
   );
 
 async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const config = await requireGuildConfig(interaction);
   if (!config) return;
 
+  const group = interaction.options.getSubcommandGroup();
   const sub = interaction.options.getSubcommand();
+
+  if (group === "template") {
+    if (sub === "add") return handleTemplateAdd(interaction);
+    if (sub === "list") return handleTemplateList(interaction);
+    if (sub === "remove") return handleTemplateRemove(interaction);
+    return;
+  }
+
   if (sub === "create") return handleCreate(interaction, config);
   if (sub === "add-den") return handleAddDen(interaction);
   if (sub === "cancel") return handleCancel(interaction);
@@ -149,16 +229,65 @@ async function buildEventDescription(
   return parts.join("\n\n").slice(0, 1000);
 }
 
+async function upsertEventDen(
+  eventId: number,
+  denId: number,
+  uniformType: "class_a" | "pack_shirt" | "other",
+  otherText: string | null,
+): Promise<void> {
+  await db
+    .insert(eventDens)
+    .values({
+      eventId,
+      denId,
+      uniformType,
+      uniformOtherText: uniformType === "other" ? otherText : null,
+    })
+    .onConflictDoUpdate({
+      target: [eventDens.eventId, eventDens.denId],
+      set: { uniformType, uniformOtherText: uniformType === "other" ? otherText : null },
+    });
+}
+
 async function handleCreate(
   interaction: ChatInputCommandInteraction,
   config: GuildConfig,
 ): Promise<void> {
   const title = interaction.options.getString("title", true);
   const date = interaction.options.getString("date", true);
-  const startTime = interaction.options.getString("start-time", true);
-  const endTime = interaction.options.getString("end-time", true);
-  const location = interaction.options.getString("location", true);
+  const templateId = interaction.options.getInteger("template");
   const details = interaction.options.getString("details");
+
+  let template: typeof eventTemplates.$inferSelect | undefined;
+  if (templateId !== null) {
+    template = await db.query.eventTemplates.findFirst({
+      where: and(eq(eventTemplates.id, templateId), eq(eventTemplates.guildId, interaction.guildId!)),
+    });
+    if (!template) {
+      await interaction.reply({ content: "Couldn't find that template.", flags: MessageFlags.Ephemeral });
+      return;
+    }
+  }
+
+  const startTime = interaction.options.getString("start-time") ?? template?.startTime ?? null;
+  const endTime = interaction.options.getString("end-time") ?? template?.endTime ?? null;
+  const location = interaction.options.getString("location") ?? template?.location ?? null;
+  const effectiveDetails = details ?? template?.details ?? null;
+
+  if (!startTime || !endTime || !location) {
+    const missing = [
+      !startTime && "start-time",
+      !endTime && "end-time",
+      !location && "location",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    await interaction.reply({
+      content: `Missing \`${missing}\` — supply it directly or pick a template that sets it.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
 
   if (!isValidDate(date)) {
     await interaction.reply({
@@ -188,14 +317,24 @@ async function handleCreate(
       startTime,
       endTime,
       location,
-      details,
+      details: effectiveDetails,
       createdBy: interaction.user.id,
     })
     .returning();
 
+  let addedDenNames: string[] = [];
+  if (template?.autoAddAllDens && template.uniformType) {
+    const guildDens = await db.query.dens.findMany({ where: eq(dens.guildId, interaction.guildId!) });
+    for (const den of guildDens) {
+      await upsertEventDen(event.id, den.id, template.uniformType, template.uniformOtherText);
+    }
+    addedDenNames = guildDens.map((den) => den.name);
+  }
+
   let discordEventNote = "";
   try {
     const guild = await resolveGuild(interaction);
+    const description = addedDenNames.length > 0 ? await buildEventDescription(event.id, effectiveDetails) : effectiveDetails ?? undefined;
     const discordEvent = await guild.scheduledEvents.create({
       name: title.slice(0, 100),
       scheduledStartTime: toUtcDate(date, startTime, config.timezone),
@@ -203,7 +342,7 @@ async function handleCreate(
       privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
       entityType: GuildScheduledEventEntityType.External,
       entityMetadata: { location: location.slice(0, 100) },
-      description: details ?? undefined,
+      description,
     });
     await db.update(events).set({ discordEventId: discordEvent.id }).where(eq(events.id, event.id));
   } catch (error) {
@@ -212,8 +351,15 @@ async function handleCreate(
       "\n(Couldn't create a linked Discord event — check the bot has the Manage Events permission.)";
   }
 
+  const addedDenNote =
+    addedDenNames.length > 0 ? `\nAuto-added dens: ${addedDenNames.join(", ")}.` : "";
+  const nextStepNote =
+    addedDenNames.length > 0
+      ? `Adjust a den's uniform by re-running \`/event add-den event-id:${event.id}\`.`
+      : `Now add eligible dens with \`/event add-den event-id:${event.id}\`.`;
+
   await interaction.reply({
-    content: `Created event **${title}** (#${event.id}) on ${date} ${startTime}–${endTime} at ${location}.\nNow add eligible dens with \`/event add-den event-id:${event.id}\`.${discordEventNote}`,
+    content: `Created event **${title}** (#${event.id}) on ${date} ${startTime}–${endTime} at ${location}.${addedDenNote}\n${nextStepNote}${discordEventNote}`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -246,18 +392,7 @@ async function handleAddDen(interaction: ChatInputCommandInteraction): Promise<v
     return;
   }
 
-  await db
-    .insert(eventDens)
-    .values({
-      eventId,
-      denId,
-      uniformType,
-      uniformOtherText: uniformType === "other" ? otherText : null,
-    })
-    .onConflictDoUpdate({
-      target: [eventDens.eventId, eventDens.denId],
-      set: { uniformType, uniformOtherText: uniformType === "other" ? otherText : null },
-    });
+  await upsertEventDen(eventId, denId, uniformType, otherText);
 
   const uniformLabel =
     uniformType === "other" ? `Other (${otherText})` : UNIFORM_LABELS[uniformType];
@@ -319,6 +454,110 @@ async function handleCancel(interaction: ChatInputCommandInteraction): Promise<v
   });
 }
 
+async function handleTemplateAdd(interaction: ChatInputCommandInteraction): Promise<void> {
+  const name = interaction.options.getString("name", true);
+  const startTime = interaction.options.getString("start-time");
+  const endTime = interaction.options.getString("end-time");
+  const location = interaction.options.getString("location");
+  const details = interaction.options.getString("details");
+  const autoAddAllDens = interaction.options.getBoolean("auto-add-all-dens") ?? false;
+  const uniformType = interaction.options.getString("uniform") as
+    | "class_a"
+    | "pack_shirt"
+    | "other"
+    | null;
+  const otherText = interaction.options.getString("other-text");
+
+  if (startTime && !isValidTime(startTime)) {
+    await interaction.reply({
+      content: "`start-time` must be 24-hour `HH:MM`, e.g. `18:30`.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (endTime && !isValidTime(endTime)) {
+    await interaction.reply({
+      content: "`end-time` must be 24-hour `HH:MM`, e.g. `20:00`.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (autoAddAllDens && !uniformType) {
+    await interaction.reply({
+      content: "`uniform` is required when `auto-add-all-dens` is true.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  if (uniformType === "other" && !otherText) {
+    await interaction.reply({
+      content: "`other-text` is required when `uniform` is Other.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const [template] = await db
+    .insert(eventTemplates)
+    .values({
+      guildId: interaction.guildId!,
+      name,
+      startTime,
+      endTime,
+      location,
+      details,
+      autoAddAllDens,
+      uniformType: autoAddAllDens ? uniformType : null,
+      uniformOtherText: autoAddAllDens && uniformType === "other" ? otherText : null,
+    })
+    .returning();
+
+  await interaction.reply({
+    content: `Saved template **${template.name}** (#${template.id}). Use it with \`/event create template:${template.id}\`.`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleTemplateList(interaction: ChatInputCommandInteraction): Promise<void> {
+  const rows = await db.query.eventTemplates.findMany({
+    where: eq(eventTemplates.guildId, interaction.guildId!),
+  });
+
+  if (rows.length === 0) {
+    await interaction.reply({ content: "No templates saved yet.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const lines = rows.map((template) => {
+    const parts = [
+      template.startTime && template.endTime ? `${template.startTime}–${template.endTime}` : null,
+      template.location,
+      template.autoAddAllDens ? "auto-adds all dens" : null,
+    ].filter(Boolean);
+    return `#${template.id} — **${template.name}**${parts.length > 0 ? ` — ${parts.join(", ")}` : ""}`;
+  });
+  await interaction.reply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });
+}
+
+async function handleTemplateRemove(interaction: ChatInputCommandInteraction): Promise<void> {
+  const templateId = interaction.options.getInteger("template", true);
+
+  const template = await db.query.eventTemplates.findFirst({
+    where: and(eq(eventTemplates.id, templateId), eq(eventTemplates.guildId, interaction.guildId!)),
+  });
+  if (!template) {
+    await interaction.reply({ content: "Couldn't find that template.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  await db.delete(eventTemplates).where(eq(eventTemplates.id, templateId));
+
+  await interaction.reply({
+    content: `Deleted template **${template.name}**.`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
 async function handleList(interaction: ChatInputCommandInteraction): Promise<void> {
   const showAll = interaction.options.getBoolean("all") ?? false;
 
@@ -375,6 +614,18 @@ async function autocomplete(interaction: AutocompleteInteraction): Promise<void>
     const matches = rows.filter((den) => den.name.toLowerCase().includes(query));
     await interaction.respond(
       matches.slice(0, 25).map((den) => ({ name: den.name.slice(0, 100), value: den.id })),
+    );
+    return;
+  }
+
+  if (focused.name === "template") {
+    const rows = await db.query.eventTemplates.findMany({
+      where: eq(eventTemplates.guildId, interaction.guildId),
+    });
+    const query = String(focused.value).toLowerCase();
+    const matches = rows.filter((template) => template.name.toLowerCase().includes(query));
+    await interaction.respond(
+      matches.slice(0, 25).map((template) => ({ name: template.name.slice(0, 100), value: template.id })),
     );
     return;
   }

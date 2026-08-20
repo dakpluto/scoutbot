@@ -22,6 +22,13 @@
       "when": 1787198321712,
       "tag": "0002_faithful_wendell_rand",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787231297163,
+      "tag": "0003_right_star_brand",
+      "breakpoints": true
     }
   ]
 }
