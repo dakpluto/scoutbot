@@ -20,6 +20,8 @@ export const guilds = sqliteTable("guilds", {
   denLeaderRoleId: text("den_leader_role_id"),
   /** Role allowed to record attendance, alongside denLeaderRoleId. */
   packLeadershipRoleId: text("pack_leadership_role_id"),
+  /** Where /event create's public announcement (calendar links + .ics) posts; falls back to the invoking channel when unset. */
+  eventAnnounceChannelId: text("event_announce_channel_id"),
   ...timestamps,
 });
 

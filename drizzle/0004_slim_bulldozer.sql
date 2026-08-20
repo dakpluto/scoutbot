@@ -1,0 +1,1 @@
+ALTER TABLE `guilds` ADD `event_announce_channel_id` text;

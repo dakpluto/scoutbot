@@ -29,6 +29,13 @@
       "when": 1787231297163,
       "tag": "0003_right_star_brand",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787266464161,
+      "tag": "0004_slim_bulldozer",
+      "breakpoints": true
     }
   ]
 }

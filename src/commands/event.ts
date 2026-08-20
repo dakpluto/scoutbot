@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import {
+  AttachmentBuilder,
   GuildScheduledEventEntityType,
   GuildScheduledEventPrivacyLevel,
   GuildScheduledEventStatus,
@@ -8,9 +9,11 @@ import {
   SlashCommandBuilder,
   type AutocompleteInteraction,
   type ChatInputCommandInteraction,
+  type SendableChannels,
 } from "discord.js";
 import { db } from "../db/index.js";
 import { attendance, dens, eventDens, eventTemplates, events, signups } from "../db/schema.js";
+import { buildGoogleCalendarUrl, buildIcsContent, buildOutlookCalendarUrl } from "../lib/calendar.js";
 import { type GuildConfig, requireGuildConfig } from "../lib/guild-config.js";
 import { toUtcDate } from "../lib/timezone.js";
 import { isValidDate, isValidTime } from "../lib/validation.js";
@@ -201,7 +204,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   }
 
   if (sub === "create") return handleCreate(interaction, config);
-  if (sub === "add-den") return handleAddDen(interaction);
+  if (sub === "add-den") return handleAddDen(interaction, config);
   if (sub === "cancel") return handleCancel(interaction);
   if (sub === "delete") return handleDelete(interaction);
   if (sub === "list") return handleList(interaction);
@@ -214,31 +217,38 @@ async function resolveGuild(interaction: ChatInputCommandInteraction) {
 
 /**
  * Rebuilds the full Discord event description from scratch (base details +
- * a den/uniform breakdown), so add-den stays correct even when it's
- * updating a den already on the event rather than adding a new one.
+ * calendar links + a den/uniform breakdown), so add-den stays correct even
+ * when it's updating a den already on the event rather than adding a new one.
  */
 async function buildEventDescription(
   eventId: number,
   baseDetails: string | null,
+  calendarLinks: { google: string; outlook: string } | null,
 ): Promise<string | undefined> {
   const rows = await db.query.eventDens.findMany({ where: eq(eventDens.eventId, eventId) });
-  if (rows.length === 0) return baseDetails ?? undefined;
 
-  const denRows = await db.query.dens.findMany({
-    where: inArray(dens.id, rows.map((row) => row.denId)),
-  });
-  const denById = new Map(denRows.map((den) => [den.id, den.name]));
+  const sections = [baseDetails];
+  if (calendarLinks) {
+    sections.push(`Add to your calendar:\nGoogle: ${calendarLinks.google}\nOutlook: ${calendarLinks.outlook}`);
+  }
 
-  const uniformLines = rows.map((row) => {
-    const denName = denById.get(row.denId) ?? `Den #${row.denId}`;
-    const uniform =
-      row.uniformType === "other" ? `Other (${row.uniformOtherText})` : UNIFORM_LABELS[row.uniformType];
-    return `${denName}: ${uniform}`;
-  });
+  if (rows.length > 0) {
+    const denRows = await db.query.dens.findMany({
+      where: inArray(dens.id, rows.map((row) => row.denId)),
+    });
+    const denById = new Map(denRows.map((den) => [den.id, den.name]));
 
-  const parts = [baseDetails, `Uniforms by den:\n${uniformLines.join("\n")}`].filter(
-    (part): part is string => Boolean(part),
-  );
+    const uniformLines = rows.map((row) => {
+      const denName = denById.get(row.denId) ?? `Den #${row.denId}`;
+      const uniform =
+        row.uniformType === "other" ? `Other (${row.uniformOtherText})` : UNIFORM_LABELS[row.uniformType];
+      return `${denName}: ${uniform}`;
+    });
+    sections.push(`Uniforms by den:\n${uniformLines.join("\n")}`);
+  }
+
+  const parts = sections.filter((part): part is string => Boolean(part));
+  if (parts.length === 0) return undefined;
   return parts.join("\n\n").slice(0, 1000);
 }
 
@@ -344,14 +354,22 @@ async function handleCreate(
     addedDenNames = guildDens.map((den) => den.name);
   }
 
+  const start = toUtcDate(date, startTime, config.timezone);
+  const end = toUtcDate(date, endTime, config.timezone);
+  const calendarInfo = { title, location, details: effectiveDetails, start, end };
+  const calendarLinks = {
+    google: buildGoogleCalendarUrl(calendarInfo),
+    outlook: buildOutlookCalendarUrl(calendarInfo),
+  };
+
   let discordEventNote = "";
   try {
     const guild = await resolveGuild(interaction);
-    const description = addedDenNames.length > 0 ? await buildEventDescription(event.id, effectiveDetails) : effectiveDetails ?? undefined;
+    const description = await buildEventDescription(event.id, effectiveDetails, calendarLinks);
     const discordEvent = await guild.scheduledEvents.create({
       name: title.slice(0, 100),
-      scheduledStartTime: toUtcDate(date, startTime, config.timezone),
-      scheduledEndTime: toUtcDate(date, endTime, config.timezone),
+      scheduledStartTime: start,
+      scheduledEndTime: end,
       privacyLevel: GuildScheduledEventPrivacyLevel.GuildOnly,
       entityType: GuildScheduledEventEntityType.External,
       entityMetadata: { location: location.slice(0, 100) },
@@ -375,9 +393,43 @@ async function handleCreate(
     content: `Created event **${title}** (#${event.id}) on ${date} ${startTime}–${endTime} at ${location}.${addedDenNote}\n${nextStepNote}${discordEventNote}`,
     flags: MessageFlags.Ephemeral,
   });
+
+  let announceChannel: SendableChannels | null = null;
+  if (config.eventAnnounceChannelId) {
+    try {
+      const channel = await interaction.client.channels.fetch(config.eventAnnounceChannelId);
+      if (channel?.isSendable()) announceChannel = channel;
+    } catch (error) {
+      console.error(
+        `Failed to fetch configured event-announcements channel for guild ${interaction.guildId}:`,
+        error,
+      );
+    }
+  }
+  if (!announceChannel && interaction.channel?.isSendable()) {
+    announceChannel = interaction.channel;
+  }
+
+  if (announceChannel) {
+    const ics = buildIcsContent(calendarInfo, `event-${event.id}@scoutbot`);
+    const icsFile = new AttachmentBuilder(Buffer.from(ics, "utf-8"), {
+      name: `${title.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.ics`,
+    });
+    await announceChannel.send({
+      content:
+        `📅 **${title}** — ${date} ${startTime}–${endTime} at ${location}\n` +
+        `Add to your calendar: [Google Calendar](${calendarLinks.google}) · [Outlook](${calendarLinks.outlook})\n` +
+        `Apple Calendar or another app: download the attached file.`,
+      files: [icsFile],
+      flags: MessageFlags.SuppressEmbeds,
+    });
+  }
 }
 
-async function handleAddDen(interaction: ChatInputCommandInteraction): Promise<void> {
+async function handleAddDen(
+  interaction: ChatInputCommandInteraction,
+  config: GuildConfig,
+): Promise<void> {
   const eventId = interaction.options.getInteger("event-id", true);
   const denId = interaction.options.getInteger("den", true);
   const uniformType = interaction.options.getString("uniform", true) as
@@ -414,7 +466,18 @@ async function handleAddDen(interaction: ChatInputCommandInteraction): Promise<v
   if (event.discordEventId) {
     try {
       const guild = await resolveGuild(interaction);
-      const description = await buildEventDescription(eventId, event.details);
+      const calendarInfo = {
+        title: event.title,
+        location: event.location,
+        details: event.details,
+        start: toUtcDate(event.date, event.startTime, config.timezone),
+        end: toUtcDate(event.date, event.endTime, config.timezone),
+      };
+      const calendarLinks = {
+        google: buildGoogleCalendarUrl(calendarInfo),
+        outlook: buildOutlookCalendarUrl(calendarInfo),
+      };
+      const description = await buildEventDescription(eventId, event.details, calendarLinks);
       await guild.scheduledEvents.edit(event.discordEventId, { description });
     } catch (error) {
       console.error(`Failed to update Discord scheduled event for event #${eventId}:`, error);

@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import {
+  ChannelType,
   MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
@@ -35,6 +36,18 @@ const data = new SlashCommandBuilder()
         opt
           .setName("pack-leadership")
           .setDescription("The Pack Leadership role")
+          .setRequired(false),
+      ),
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("channels")
+      .setDescription("Set where ScoutBot posts certain messages")
+      .addChannelOption((opt) =>
+        opt
+          .setName("event-announcements")
+          .setDescription("Where /event create's public calendar-link announcement posts")
+          .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
           .setRequired(false),
       ),
   )
@@ -80,6 +93,11 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
 
   if (sub === "roles") {
     await handleRoles(interaction);
+    return;
+  }
+
+  if (sub === "channels") {
+    await handleChannels(interaction);
     return;
   }
 }
@@ -153,6 +171,39 @@ async function handleRoles(interaction: ChatInputCommandInteraction): Promise<vo
   if (packLeadershipRole) parts.push(`Pack Leadership → ${packLeadershipRole.toString()}`);
   await interaction.reply({
     content: `Updated attendance permissions:\n${parts.join("\n")}`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function handleChannels(interaction: ChatInputCommandInteraction): Promise<void> {
+  const eventAnnouncements = interaction.options.getChannel("event-announcements");
+
+  if (!eventAnnouncements) {
+    await interaction.reply({
+      content: "Provide `event-announcements`.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const existing = await db.query.guilds.findFirst({
+    where: eq(guilds.id, interaction.guildId!),
+  });
+  if (!existing) {
+    await interaction.reply({
+      content: "Run `/setup guild` first.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  await db
+    .update(guilds)
+    .set({ eventAnnounceChannelId: eventAnnouncements.id, updatedAt: new Date() })
+    .where(eq(guilds.id, interaction.guildId!));
+
+  await interaction.reply({
+    content: `Event-creation announcements will now post in ${eventAnnouncements.toString()}.`,
     flags: MessageFlags.Ephemeral,
   });
 }
