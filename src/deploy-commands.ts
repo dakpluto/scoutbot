@@ -1,4 +1,5 @@
 import { REST, Routes } from "discord.js";
+import { closeDb } from "./db/index.js";
 import { env } from "./env.js";
 import { commands } from "./commands/index.js";
 
@@ -17,3 +18,5 @@ const target = env.discordDevGuildId
 console.log(`Registering ${body.length} slash command(s) ${target}...`);
 await rest.put(route, { body });
 console.log("Done.");
+
+closeDb();
