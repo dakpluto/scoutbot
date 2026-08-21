@@ -49,7 +49,7 @@ export function renderPage(title: string, body: string): string {
     align-items: center;
     gap: 0.75rem;
   }
-  .site-header img { height: 40px; display: block; }
+  .site-header img { height: 70px; display: block; }
   .site-header .wordmark {
     font-family: "Roboto Slab", serif;
     font-weight: 700;
