@@ -13,7 +13,7 @@ import type { Command } from "./index.js";
 const data = new SlashCommandBuilder()
   .setName("setup")
   .setDescription("Configure ScoutBot for this server")
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addSubcommand((sub) =>
     sub
       .setName("guild")

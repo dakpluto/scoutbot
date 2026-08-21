@@ -14,6 +14,8 @@ key.txt
 
 .DS_Store
 
+.claude/settings.local.json
+
 # pack-specific branding, not this repo's to ship — see public/README.md
 public/*
 !public/README.md
