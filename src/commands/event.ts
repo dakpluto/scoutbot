@@ -204,7 +204,7 @@ async function execute(interaction: ChatInputCommandInteraction): Promise<void> 
   }
 
   if (sub === "create") return handleCreate(interaction, config);
-  if (sub === "add-den") return handleAddDen(interaction, config);
+  if (sub === "add-den") return handleAddDen(interaction);
   if (sub === "cancel") return handleCancel(interaction);
   if (sub === "delete") return handleDelete(interaction);
   if (sub === "list") return handleList(interaction);
@@ -217,20 +217,16 @@ async function resolveGuild(interaction: ChatInputCommandInteraction) {
 
 /**
  * Rebuilds the full Discord event description from scratch (base details +
- * calendar links + a den/uniform breakdown), so add-den stays correct even
- * when it's updating a den already on the event rather than adding a new one.
+ * a den/uniform breakdown), so add-den stays correct even when it's
+ * updating a den already on the event rather than adding a new one.
  */
 async function buildEventDescription(
   eventId: number,
   baseDetails: string | null,
-  calendarLinks: { google: string; outlook: string } | null,
 ): Promise<string | undefined> {
   const rows = await db.query.eventDens.findMany({ where: eq(eventDens.eventId, eventId) });
 
   const sections = [baseDetails];
-  if (calendarLinks) {
-    sections.push(`Add to your calendar:\nGoogle: ${calendarLinks.google}\nOutlook: ${calendarLinks.outlook}`);
-  }
 
   if (rows.length > 0) {
     const denRows = await db.query.dens.findMany({
@@ -365,7 +361,7 @@ async function handleCreate(
   let discordEventNote = "";
   try {
     const guild = await resolveGuild(interaction);
-    const description = await buildEventDescription(event.id, effectiveDetails, calendarLinks);
+    const description = await buildEventDescription(event.id, effectiveDetails);
     const discordEvent = await guild.scheduledEvents.create({
       name: title.slice(0, 100),
       scheduledStartTime: start,
@@ -426,10 +422,7 @@ async function handleCreate(
   }
 }
 
-async function handleAddDen(
-  interaction: ChatInputCommandInteraction,
-  config: GuildConfig,
-): Promise<void> {
+async function handleAddDen(interaction: ChatInputCommandInteraction): Promise<void> {
   const eventId = interaction.options.getInteger("event-id", true);
   const denId = interaction.options.getInteger("den", true);
   const uniformType = interaction.options.getString("uniform", true) as
@@ -466,18 +459,7 @@ async function handleAddDen(
   if (event.discordEventId) {
     try {
       const guild = await resolveGuild(interaction);
-      const calendarInfo = {
-        title: event.title,
-        location: event.location,
-        details: event.details,
-        start: toUtcDate(event.date, event.startTime, config.timezone),
-        end: toUtcDate(event.date, event.endTime, config.timezone),
-      };
-      const calendarLinks = {
-        google: buildGoogleCalendarUrl(calendarInfo),
-        outlook: buildOutlookCalendarUrl(calendarInfo),
-      };
-      const description = await buildEventDescription(eventId, event.details, calendarLinks);
+      const description = await buildEventDescription(eventId, event.details);
       await guild.scheduledEvents.edit(event.discordEventId, { description });
     } catch (error) {
       console.error(`Failed to update Discord scheduled event for event #${eventId}:`, error);
