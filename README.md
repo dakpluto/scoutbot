@@ -21,7 +21,13 @@ pack can fork this repo and stand it up for their own server.
 
 ## Requirements
 
-- Node.js 24 or newer
+- Node.js 24, but **not 24.19.0** — that release broke native `ObjectWrap`
+  addons like `better-sqlite3` with a cleanup-hook assertion crash
+  (`RemoveEnvironmentCleanupHook`/`env != nullptr`) that can kill the process
+  at almost any point, not just on startup. Use `nvm install 24.18.1 && nvm use
+  24.18.1` (see `.nvmrc`) until a patched Node ships. `npm install` (or `npm
+  rebuild better-sqlite3`) after switching versions, since it's a native
+  module.
 - A Discord account with permission to create applications in the
   [Discord Developer Portal](https://discord.com/developers/applications)
 - A Discord server (guild) you can add a bot to

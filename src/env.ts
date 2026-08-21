@@ -16,4 +16,6 @@ export const env = {
   databasePath: process.env.DATABASE_PATH ?? "./scoutbot.db",
   backupRepoUrl: process.env.BACKUP_REPO_URL,
   agePublicKey: process.env.AGE_PUBLIC_KEY,
+  /** Optional: shown by /portal. Not every deployment runs the web portal. */
+  portalUrl: process.env.PORTAL_URL,
 };

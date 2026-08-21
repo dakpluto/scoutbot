@@ -51,6 +51,14 @@ export function memberRoleIds(
   return [...member.roles.cache.keys()];
 }
 
+/** Whether any of the given role IDs is the guild's configured Den Leader or Pack Leadership role. */
+export function hasLeaderRole(roleIds: string[], config: GuildConfig): boolean {
+  return Boolean(
+    (config.denLeaderRoleId && roleIds.includes(config.denLeaderRoleId)) ||
+      (config.packLeadershipRoleId && roleIds.includes(config.packLeadershipRoleId)),
+  );
+}
+
 /**
  * Attendance is gated on the guild's configured Den Leader / Pack Leadership
  * roles, not on a per-den role like signups are. If neither role has been
@@ -62,10 +70,7 @@ export function canRecordAttendance(
   config: GuildConfig,
 ): boolean {
   const roleIds = memberRoleIds(interaction);
-  const hasConfiguredRole =
-    (config.denLeaderRoleId && roleIds.includes(config.denLeaderRoleId)) ||
-    (config.packLeadershipRoleId && roleIds.includes(config.packLeadershipRoleId));
-  if (hasConfiguredRole) return true;
+  if (hasLeaderRole(roleIds, config)) return true;
 
   const rolesConfigured = Boolean(config.denLeaderRoleId || config.packLeadershipRoleId);
   if (rolesConfigured) return false;
