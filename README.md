@@ -121,21 +121,26 @@ npm run dev                # runs the bot with auto-restart on file changes
 
 ## Backups
 
-Backups aren't part of this repo's runtime — set up a daily cron job on
-your deploy target that:
+`scripts/backup.sh` dumps the database, encrypts it with `age`, and pushes
+it as `backups/YYYY-MM-DD.sql.age` to the private repo at `BACKUP_REPO_URL`
+(keep this separate from your, potentially public, code repo). It prunes
+backup files older than 14 days from that repo on each run. Set it up on
+your deploy target:
 
-1. Dumps the database: `sqlite3 $DATABASE_PATH .dump > backup.sql`
-2. Encrypts it: `age -r <your AGE_PUBLIC_KEY> -o backup.sql.age backup.sql`
-3. Deletes the plaintext dump
-4. Commits and pushes `backup.sql.age` to a **private** repo of your own —
-   keep this separate from your (potentially public) code repo
+1. Generate a keypair: `age-keygen -o key.txt`. Keep the private key off
+   the device's SD card alone (a password manager works well) in case the
+   card fails.
+2. Set `BACKUP_REPO_URL` (an SSH URL, using a deploy key scoped to that one
+   repo) and `AGE_PUBLIC_KEY` in `.env`.
+3. Add a daily cron entry, e.g. `crontab -e`:
+   ```
+   0 3 * * * /home/pi/scoutbot/scripts/backup.sh >> /home/pi/scoutbot/backup.log 2>&1
+   ```
 
-Generate a keypair with `age-keygen -o key.txt`; keep the private key off
-the device's SD card alone (a password manager works well) in case the card
-fails. Test the restore path before you need it:
+Test the restore path before you need it:
 
 ```bash
-age -d -i key.txt backup.sql.age > backup.sql
+age -d -i key.txt backups/2026-08-22.sql.age > backup.sql
 sqlite3 restored.db < backup.sql
 ```
 
