@@ -113,6 +113,18 @@ export function renderPage(title: string, body: string): string {
   .btn:hover { background: var(--nav-blue); }
   .muted { color: var(--muted); font-size: 0.9em; }
   .cancelled { color: #999; text-decoration: line-through; }
+  .status-ok { color: #1a7f37; font-weight: 600; }
+  .status-bad { color: #c0392b; font-weight: 600; }
+  pre {
+    white-space: pre-wrap;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 0.85rem;
+    background: var(--bg);
+    padding: 0.75rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.5rem 0 0;
+  }
 </style>
 </head>
 <body>
@@ -125,10 +137,11 @@ ${body}
 </html>`;
 }
 
-export function renderNav(user?: { displayName: string; isLeader: boolean }): string {
+export function renderNav(user?: { displayName: string; isLeader: boolean; isOwner: boolean }): string {
   if (!user) return "";
   const links = ['<a href="/me">My Scouts</a>'];
   if (user.isLeader) links.push('<a href="/roster">Roster</a>');
+  if (user.isOwner) links.push('<a href="/status">Status</a>');
   links.push(`<a href="/auth/logout">Log out (${escapeHtml(user.displayName)})</a>`);
   return `<nav class="portal-nav">${links.join("")}</nav>`;
 }

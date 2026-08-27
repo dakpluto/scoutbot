@@ -19,4 +19,6 @@ export const webEnv = {
   webBaseUrl: required("WEB_BASE_URL"),
   webPort: Number(process.env.WEB_PORT ?? 3000),
   sessionSecret: required("SESSION_SECRET"),
+  /** Discord user ID allowed onto /status. Unset means the status page is disabled for everyone. */
+  ownerDiscordId: process.env.OWNER_DISCORD_ID,
 };

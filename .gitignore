@@ -14,6 +14,9 @@ dist/
 # lock file coordinating scripts/backup.sh and scripts/backup-logs.sh
 /.backup-repo.lock
 
+# marker written by scripts/backup.sh, read by the /status page
+/.last-backup-success
+
 # age keys must never be committed
 *.age
 key.txt

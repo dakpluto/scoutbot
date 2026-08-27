@@ -5,6 +5,7 @@
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+project_root="$(pwd)"
 
 set -a
 source .env
@@ -49,3 +50,4 @@ git -c user.email="scoutbot-backup@localhost" -c user.name="ScoutBot Backup" \
   commit --quiet -m "Backup $date_stamp"
 git push --quiet
 echo "backup.sh: pushed backups/$encrypted_file"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) pushed backups/$encrypted_file" > "$project_root/.last-backup-success"

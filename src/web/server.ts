@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { and, desc, eq, inArray } from "drizzle-orm";
@@ -10,6 +11,7 @@ import { hasLeaderRole } from "../lib/guild-config.js";
 import { toUtcDate } from "../lib/timezone.js";
 import { buildAuthorizeUrl, exchangeCodeForIdentity, fetchAllGuildMembers, fetchGuildMember } from "./auth.js";
 import { webEnv } from "./env.js";
+import { getLastBackupInfo, getPiVitals, getRecentErrors, getServiceStatus, restartService } from "./status.js";
 import { escapeHtml, renderMain, renderNav, renderPage } from "./views.js";
 
 interface SessionUser {
@@ -17,20 +19,25 @@ interface SessionUser {
   username: string;
   displayName: string;
   isLeader: boolean;
+  isOwner: boolean;
 }
 
 declare module "express-session" {
   interface SessionData {
     user?: SessionUser;
+    csrfToken?: string;
   }
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(__dirname, "../../public");
 
+const lastBackupMarkerPath = path.join(__dirname, "../../.last-backup-success");
+
 const app = express();
 app.set("trust proxy", 1);
 app.use(express.static(publicDir));
+app.use(express.urlencoded({ extended: false }));
 app.use(
   session({
     secret: webEnv.sessionSecret,
@@ -51,6 +58,14 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
 function requireLeader(req: Request, res: Response, next: NextFunction): void {
   if (!req.session.user?.isLeader) {
     res.status(403).send(renderPage("Forbidden", renderMain("<h1>Forbidden</h1><p>Leaders only.</p>")));
+    return;
+  }
+  next();
+}
+
+function requireOwner(req: Request, res: Response, next: NextFunction): void {
+  if (!req.session.user?.isOwner) {
+    res.status(403).send(renderPage("Forbidden", renderMain("<h1>Forbidden</h1><p>Not authorized.</p>")));
     return;
   }
   next();
@@ -97,12 +112,14 @@ app.get("/auth/callback", async (req: Request, res: Response) => {
 
     const config = await db.query.guilds.findFirst({ where: eq(guilds.id, webEnv.webGuildId) });
     const isLeader = config ? hasLeaderRole(member.roleIds, config) : false;
+    const isOwner = webEnv.ownerDiscordId !== undefined && identity.id === webEnv.ownerDiscordId;
 
     req.session.user = {
       id: identity.id,
       username: identity.username,
       displayName: member.displayName,
       isLeader,
+      isOwner,
     };
     res.redirect("/me");
   } catch (error) {
@@ -243,6 +260,79 @@ app.get("/roster", requireAuth, requireLeader, async (req: Request, res: Respons
     <h2>Events</h2>${eventSections.join("\n")}`;
 
   res.send(renderPage("Roster", nav + renderMain(body)));
+});
+
+app.get("/status", requireAuth, requireOwner, async (req: Request, res: Response) => {
+  const user = req.session.user!;
+  const nav = renderNav(user);
+
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = crypto.randomBytes(24).toString("hex");
+  }
+
+  const [botStatus, webStatus, vitals, botErrors, backupInfo] = await Promise.all([
+    getServiceStatus("scoutbot.service"),
+    getServiceStatus("scoutbot-web.service"),
+    getPiVitals(),
+    getRecentErrors("scoutbot.service"),
+    getLastBackupInfo(lastBackupMarkerPath),
+  ]);
+
+  const badge = (status: { active: boolean; state: string; since: string | null }) =>
+    `<span class="${status.active ? "status-ok" : "status-bad"}">${escapeHtml(status.state)}</span>${
+      status.since ? ` <span class="muted">since ${escapeHtml(status.since)}</span>` : ""
+    }`;
+
+  let banner = "";
+  if (req.query.restarted === "1") {
+    banner = '<p class="status-ok">Restart requested — give it a few seconds to reconnect.</p>';
+  } else if (req.query.restart_failed === "1") {
+    banner = '<p class="status-bad">Restart failed — check the Pi directly over SSH.</p>';
+  }
+
+  const body = `<h1>Status</h1>
+    ${banner}
+    <div class="card">
+      <h2>Bot</h2>
+      <p>${badge(botStatus)}</p>
+      <form method="post" action="/status/restart-bot" onsubmit="return confirm('Restart the ScoutBot Discord bot now? It will be briefly offline.');">
+        <input type="hidden" name="csrfToken" value="${escapeHtml(req.session.csrfToken)}">
+        <button class="btn" type="submit">Restart bot</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Web portal</h2>
+      <p>${badge(webStatus)}</p>
+      <p class="muted">No restart button here — if this were down, this page wouldn't be reachable anyway.</p>
+    </div>
+    <div class="card">
+      <h2>Pi vitals</h2>
+      <pre>${escapeHtml(vitals)}</pre>
+    </div>
+    <div class="card">
+      <h2>Bot errors (last 24h)</h2>
+      <pre>${escapeHtml(botErrors)}</pre>
+    </div>
+    <div class="card">
+      <h2>Last DB backup</h2>
+      <p>${escapeHtml(backupInfo)}</p>
+    </div>`;
+
+  res.send(renderPage("Status", nav + renderMain(body)));
+});
+
+app.post("/status/restart-bot", requireAuth, requireOwner, async (req: Request, res: Response) => {
+  if (req.body.csrfToken !== req.session.csrfToken) {
+    res.status(403).send(renderPage("Forbidden", renderMain("<h1>Forbidden</h1><p>Invalid form token, go back and retry.</p>")));
+    return;
+  }
+  try {
+    await restartService("scoutbot.service");
+    res.redirect("/status?restarted=1");
+  } catch (error) {
+    console.error("Failed to restart bot:", error);
+    res.redirect("/status?restart_failed=1");
+  }
 });
 
 app.listen(webEnv.webPort, () => {
