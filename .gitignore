@@ -11,6 +11,9 @@ dist/
 # runtime state for scripts/backup-logs.sh
 /logs/
 
+# lock file coordinating scripts/backup.sh and scripts/backup-logs.sh
+/.backup-repo.lock
+
 # age keys must never be committed
 *.age
 key.txt

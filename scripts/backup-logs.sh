@@ -59,6 +59,13 @@ timestamp=$(date +%Y-%m-%dT%H%M)
 encrypted_file="$timestamp.log.age"
 age -r "$AGE_PUBLIC_KEY" -o "$workdir/$encrypted_file" "$pending_file"
 
+# Serialize with backup.sh's push to the same repo/branch - both do a fresh
+# clone-commit-push, and without this lock a push landing between this
+# script's clone and its own push gets rejected as a non-fast-forward.
+# pending_file is left untouched, so a skipped run just retries next time.
+exec 200>"$project_root/.backup-repo.lock"
+flock -w 120 200 || { echo "backup-logs.sh: could not acquire backup-repo lock, skipping this run" >&2; exit 1; }
+
 git clone --quiet --depth 1 "$BACKUP_REPO_URL" "$workdir/repo"
 mkdir -p "$workdir/repo/logs"
 cp "$workdir/$encrypted_file" "$workdir/repo/logs/"

@@ -26,6 +26,12 @@ sqlite3 "$DATABASE_PATH" ".dump" > "$dump_file"
 age -r "$AGE_PUBLIC_KEY" -o "$workdir/$encrypted_file" "$dump_file"
 rm -f "$dump_file"
 
+# Serialize with backup-logs.sh's push to the same repo/branch - both do a
+# fresh clone-commit-push, and without this lock a push landing between this
+# script's clone and its own push gets rejected as a non-fast-forward.
+exec 200>"$(dirname "${BASH_SOURCE[0]}")/../.backup-repo.lock"
+flock -w 120 200 || { echo "backup.sh: could not acquire backup-repo lock, skipping this run" >&2; exit 1; }
+
 git clone --quiet --depth 1 "$BACKUP_REPO_URL" "$workdir/repo"
 mkdir -p "$workdir/repo/backups"
 cp "$workdir/$encrypted_file" "$workdir/repo/backups/"
