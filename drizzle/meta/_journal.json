@@ -36,6 +36,13 @@
       "when": 1787266464161,
       "tag": "0004_slim_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787831750101,
+      "tag": "0005_quick_centennial",
+      "breakpoints": true
     }
   ]
 }

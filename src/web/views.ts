@@ -111,10 +111,17 @@ export function renderPage(title: string, body: string): string {
     font-weight: 500;
   }
   .btn:hover { background: var(--nav-blue); }
+  .btn-danger { background: #c0392b; }
+  .btn-danger:hover { background: #a53125; }
+  .inline-form { display: inline-block; margin: 0; }
   .muted { color: var(--muted); font-size: 0.9em; }
   .cancelled { color: #999; text-decoration: line-through; }
   .status-ok { color: #1a7f37; font-weight: 600; }
   .status-bad { color: #c0392b; font-weight: 600; }
+  .row-danger td { background: #fdecea; color: #7a271a; }
+  .select-all { font-weight: normal; text-transform: none; letter-spacing: normal; margin-left: 0.75rem; }
+  .bulk-actions { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; }
+  .bulk-actions select { padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); }
   pre {
     white-space: pre-wrap;
     font-family: ui-monospace, "Cascadia Code", Consolas, monospace;

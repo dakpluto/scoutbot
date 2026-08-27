@@ -47,6 +47,12 @@ export const scouts = sqliteTable("scouts", {
   denId: integer("den_id")
     .notNull()
     .references(() => dens.id),
+  /** bridged = moved on to a Boy Scout troop (kept indefinitely); left = left the pack (eligible for deletion after 6 weeks). */
+  status: text("status", { enum: ["active", "bridged", "left"] })
+    .notNull()
+    .default("active"),
+  /** When status last changed — drives the 6-week "left" deletion eligibility on the roster page. */
+  statusChangedAt: integer("status_changed_at", { mode: "timestamp" }),
   ...timestamps,
 });
 
@@ -117,9 +123,8 @@ export const signups = sqliteTable("signups", {
   eventId: integer("event_id")
     .notNull()
     .references(() => events.id),
-  scoutId: integer("scout_id")
-    .notNull()
-    .references(() => scouts.id),
+  /** Nullable + set-null-on-delete so deleting a scout from the roster keeps their signup history. */
+  scoutId: integer("scout_id").references(() => scouts.id, { onDelete: "set null" }),
   parentDiscordId: text("parent_discord_id").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -135,9 +140,8 @@ export const attendance = sqliteTable("attendance", {
   eventId: integer("event_id")
     .notNull()
     .references(() => events.id),
-  scoutId: integer("scout_id")
-    .notNull()
-    .references(() => scouts.id),
+  /** Nullable + set-null-on-delete so deleting a scout from the roster keeps their attendance history. */
+  scoutId: integer("scout_id").references(() => scouts.id, { onDelete: "set null" }),
   markedBy: text("marked_by").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

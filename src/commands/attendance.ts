@@ -149,7 +149,7 @@ async function handleList(interaction: ChatInputCommandInteraction): Promise<voi
     return;
   }
 
-  const scoutIds = rows.map((row) => row.scoutId);
+  const scoutIds = rows.map((row) => row.scoutId).filter((id): id is number => id !== null);
   const scoutRows = await db.query.scouts.findMany({ where: eq(scouts.guildId, interaction.guildId!) });
   const scoutById = new Map(scoutRows.map((scout) => [scout.id, scout]));
 
