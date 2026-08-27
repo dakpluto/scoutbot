@@ -45,6 +45,13 @@ fi
 printf '%s\n' "$log_lines" >> "$pending_file"
 [[ -n "$new_cursor" ]] && echo "$new_cursor" > "$cursor_file"
 
+# pending_file only clears on a successful push, so a prolonged outage would
+# otherwise grow it unbounded. Surface it loudly rather than losing data.
+pending_bytes=$(wc -c < "$pending_file")
+if (( pending_bytes > 20 * 1024 * 1024 )); then
+  echo "backup-logs.sh: WARNING pending.log is $((pending_bytes / 1024 / 1024))MB and hasn't pushed successfully in a while - check network/backup repo access" >&2
+fi
+
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
 
