@@ -262,7 +262,7 @@ app.get("/roster", requireAuth, requireLeader, async (req: Request, res: Respons
   res.send(renderPage("Roster", nav + renderMain(body)));
 });
 
-app.get("/status", requireAuth, requireOwner, async (req: Request, res: Response) => {
+app.get("/health", requireAuth, requireOwner, async (req: Request, res: Response) => {
   const user = req.session.user!;
   const nav = renderNav(user);
 
@@ -295,7 +295,7 @@ app.get("/status", requireAuth, requireOwner, async (req: Request, res: Response
     <div class="card">
       <h2>Bot</h2>
       <p>${badge(botStatus)}</p>
-      <form method="post" action="/status/restart-bot" onsubmit="return confirm('Restart the ScoutBot Discord bot now? It will be briefly offline.');">
+      <form method="post" action="/health/restart-bot" onsubmit="return confirm('Restart the ScoutBot Discord bot now? It will be briefly offline.');">
         <input type="hidden" name="csrfToken" value="${escapeHtml(req.session.csrfToken)}">
         <button class="btn" type="submit">Restart bot</button>
       </form>
@@ -321,17 +321,17 @@ app.get("/status", requireAuth, requireOwner, async (req: Request, res: Response
   res.send(renderPage("Status", nav + renderMain(body)));
 });
 
-app.post("/status/restart-bot", requireAuth, requireOwner, async (req: Request, res: Response) => {
+app.post("/health/restart-bot", requireAuth, requireOwner, async (req: Request, res: Response) => {
   if (req.body.csrfToken !== req.session.csrfToken) {
     res.status(403).send(renderPage("Forbidden", renderMain("<h1>Forbidden</h1><p>Invalid form token, go back and retry.</p>")));
     return;
   }
   try {
     await restartService("scoutbot.service");
-    res.redirect("/status?restarted=1");
+    res.redirect("/health?restarted=1");
   } catch (error) {
     console.error("Failed to restart bot:", error);
-    res.redirect("/status?restart_failed=1");
+    res.redirect("/health?restart_failed=1");
   }
 });
 
