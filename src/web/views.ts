@@ -147,7 +147,7 @@ ${body}
 export function renderNav(user?: { displayName: string; isLeader: boolean; isOwner: boolean }): string {
   if (!user) return "";
   const links = ['<a href="/me">My Scouts</a>'];
-  if (user.isLeader) links.push('<a href="/roster">Roster</a>');
+  if (user.isLeader) links.push('<a href="/roster">Roster</a>', '<a href="/attendance">Attendance</a>');
   if (user.isOwner) links.push('<a href="/health">Status</a>');
   links.push(`<a href="/auth/logout">Log out (${escapeHtml(user.displayName)})</a>`);
   return `<nav class="portal-nav">${links.join("")}</nav>`;

@@ -325,10 +325,17 @@ app.get("/roster", requireAuth, requireLeader, async (req: Request, res: Respons
       }
     </script>`;
 
-  const eventRows = await db.query.events.findMany({
-    where: eq(events.guildId, webEnv.webGuildId),
-    orderBy: desc(events.date),
-  });
+  res.send(renderPage("Roster", nav + renderMain(rosterBody)));
+});
+
+app.get("/attendance", requireAuth, requireLeader, async (req: Request, res: Response) => {
+  const user = req.session.user!;
+  const nav = renderNav(user);
+
+  const [scoutRows, eventRows] = await Promise.all([
+    db.query.scouts.findMany({ where: eq(scouts.guildId, webEnv.webGuildId) }),
+    db.query.events.findMany({ where: eq(events.guildId, webEnv.webGuildId), orderBy: desc(events.date) }),
+  ]);
   const eventIds = eventRows.map((event) => event.id);
   const [allSignups, allAttendance] = await Promise.all([
     eventIds.length > 0 ? db.query.signups.findMany({ where: inArray(signups.eventId, eventIds) }) : [],
@@ -358,9 +365,9 @@ app.get("/roster", requireAuth, requireLeader, async (req: Request, res: Respons
       </div>`;
   });
 
-  const body = `${rosterBody}<h2>Events</h2>${eventSections.join("\n")}`;
+  const body = `<h1>Attendance</h1>${eventSections.join("\n") || '<p class="muted">No events yet.</p>'}`;
 
-  res.send(renderPage("Roster", nav + renderMain(body)));
+  res.send(renderPage("Attendance", nav + renderMain(body)));
 });
 
 app.post("/roster/bulk-action", requireAuth, requireLeader, async (req: Request, res: Response) => {
