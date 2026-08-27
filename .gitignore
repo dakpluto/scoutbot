@@ -8,6 +8,9 @@ dist/
 *.db-wal
 *.db-shm
 
+# runtime state for scripts/backup-logs.sh
+/logs/
+
 # age keys must never be committed
 *.age
 key.txt

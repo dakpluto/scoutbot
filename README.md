@@ -144,6 +144,25 @@ age -d -i key.txt backups/2026-08-22.sql.age > backup.sql
 sqlite3 restored.db < backup.sql
 ```
 
+### Log backups
+
+`scripts/backup-logs.sh` ships new `journalctl` entries to the same private
+repo as `logs/YYYY-MM-DDTHHMM.log.age`, using the same `age` key. This
+matters if your deploy target only keeps volatile (in-RAM) journal logs —
+a lockup or crash that needs a power cycle would otherwise erase the
+evidence. New entries are appended to a local plain-text file
+(`logs/pending.log`) first, and only cleared once a push to the backup
+repo actually succeeds — so a network blip never loses logs, it just
+retries with everything accumulated so far on the next run. Uses the same
+`BACKUP_REPO_URL` / `AGE_PUBLIC_KEY` as the DB backup above; add it to cron
+alongside `backup.sh`, e.g. every 15 minutes:
+
+```
+*/15 * * * * /home/pi/scoutbot/scripts/backup-logs.sh >> /home/pi/scoutbot/backup-logs.log 2>&1
+```
+
+Restore/read the same way as the DB backup: `age -d -i key.txt logs/2026-08-26T2015.log.age`.
+
 ## Privacy
 
 Only a scout's first name and last initial are stored — no full names, no
